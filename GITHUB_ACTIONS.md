@@ -94,26 +94,79 @@ Here's what happens during a build:
    ↓
 2. Check System (Windows version, DISM, disk space)
    ↓
-3. Download Windows 11 ISO (if URL provided)
+3. Generate ISO cache key (hash of ISO URL)
    ↓
-4. Mount ISO to a drive letter
+4. Restore ISO from cache (if available)
    ↓
-5. Select appropriate build script (based on architecture/edition)
+5. Download Windows 11 ISO (only if not cached)
    ↓
-6. Create automated version of script (removes interactive prompts)
+6. Verify ISO file exists and has correct size
    ↓
-7. Run Nano11 Builder script
-   - Copy files
-   - Remove bloatware
-   - Apply registry tweaks
-   - Create new ISO
+7. Mount ISO to a drive letter
    ↓
-8. Upload ISO as artifact
+8. Select appropriate build script (based on architecture/edition)
    ↓
-9. Cleanup temporary files
+9. Create automated version of script (removes interactive prompts)
    ↓
-10. Display summary
+10. Run Nano11 Builder script
+    - Copy files
+    - Remove bloatware
+    - Apply registry tweaks
+    - Create new ISO
+   ↓
+11. Upload ISO as artifact
+   ↓
+12. Cleanup temporary files (preserves source ISO for caching)
+   ↓
+13. Display summary
 ```
+
+## ISO Caching
+
+The workflow automatically caches downloaded ISOs to speed up subsequent builds:
+
+### How It Works
+
+- **Cache Key**: Generated from a hash of the ISO URL
+- **Cache Storage**: Uses GitHub Actions cache (10GB limit per repository)
+- **Cache Duration**: Automatically evicted after 7 days of inactivity
+- **Automatic**: No configuration needed
+
+### Benefits
+
+- **Time Savings**: Skip ~6GB download on repeat builds (saves 5-10 minutes)
+- **Bandwidth Savings**: Reduces data transfer for both GitHub and users
+- **Reliability**: Fewer network-related failures
+
+### Cache Behavior
+
+- **First Build**: Downloads ISO and caches it
+- **Subsequent Builds**: Restores ISO from cache instantly
+- **Different ISOs**: Each unique ISO URL has its own cache entry
+- **Same ISO, Different Build**: Cache is reused across different architectures/editions
+
+### Example Timeline
+
+| Build | ISO URL | Download Time | Cache Status |
+|-------|---------|---------------|--------------|
+| Build #1 | URL-A | 8 minutes | Cached |
+| Build #2 | URL-A | 5 seconds | Cache hit |
+| Build #3 | URL-B | 8 minutes | Cached |
+| Build #4 | URL-A | 5 seconds | Cache hit |
+
+### Manual Cache Management
+
+To clear the cache:
+1. Go to **Settings** → **Actions** → **Caches**
+2. Find caches starting with `windows11-iso-`
+3. Click the delete icon to remove specific cache entries
+
+This is useful if you need to re-download a corrupted ISO or free up cache space.
+
+**Note on Cache Eviction**: Caches are automatically evicted:
+- After 7 days of no access (not use) to the cache entry
+- When the repository exceeds 10GB total cache size (oldest entries removed first)
+- Can be manually deleted at any time
 
 ## Limitations & Considerations
 
@@ -136,8 +189,10 @@ Here's what happens during a build:
 
 - You need a direct download URL for Windows 11 ISO
 - The URL must be publicly accessible
-- ISO download counts toward workflow execution time
-- Consider using a fast CDN for quicker builds
+- First download counts toward workflow execution time
+- Downloaded ISOs are automatically cached for future builds
+- Cache limit: 10GB total per repository (sufficient for 1-2 ISOs)
+- Consider using a fast CDN for quicker initial downloads
 
 ### Security Notes
 

@@ -34,7 +34,7 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: read
-      actions: read
+      actions: write  # Required for cache saving
     
     steps:
     - name: Checkout repository
@@ -58,10 +58,10 @@ jobs:
         Write-Host "This workflow demonstrates that you CAN build Nano11 ISOs in GitHub Actions!"
         Write-Host ""
         Write-Host "GitHub Actions provides:"
-        Write-Host "  ✓ Windows Server runners with DISM pre-installed"
-        Write-Host "  ✓ Sufficient disk space for ISO creation"
-        Write-Host "  ✓ PowerShell and batch script support"
-        Write-Host "  ✓ Artifact upload for distributing results"
+        Write-Host "  [OK] Windows Server runners with DISM pre-installed"
+        Write-Host "  [OK] Sufficient disk space for ISO creation"
+        Write-Host "  [OK] PowerShell and batch script support"
+        Write-Host "  [OK] Artifact upload for distributing results"
         Write-Host ""
         Write-Host "Selected Configuration:"
         Write-Host "  - Architecture: ${{ inputs.architecture }}"
@@ -77,8 +77,33 @@ jobs:
           Write-Host "ISO URL provided: ${{ inputs.iso_url }}"
         }
         
-    - name: Download Windows 11 ISO
+    - name: Generate ISO cache key
       if: inputs.iso_url != ''
+      id: iso-cache-key
+      shell: powershell
+      run: |
+        $isoUrl = "${{ inputs.iso_url }}"
+        # Create a hash of the ISO URL for the cache key
+        $hash = [System.Security.Cryptography.SHA256]::Create()
+        $hashBytes = $hash.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($isoUrl))
+        $hashString = [System.BitConverter]::ToString($hashBytes).Replace("-", "").ToLower()
+        
+        Write-Host "ISO URL: $isoUrl"
+        Write-Host "Cache key hash: $hashString"
+        
+        # Set the cache key as output
+        echo "cache-key=windows11-iso-$hashString" >> $env:GITHUB_OUTPUT
+        
+    - name: Restore ISO from cache
+      if: inputs.iso_url != ''
+      id: cache-iso
+      uses: actions/cache@v4
+      with:
+        path: C:\Windows11.iso
+        key: ${{ steps.iso-cache-key.outputs.cache-key }}
+        
+    - name: Download Windows 11 ISO
+      if: inputs.iso_url != '' && steps.cache-iso.outputs.cache-hit != 'true'
       shell: powershell
       run: |
         Write-Host "Downloading Windows 11 ISO..."
@@ -92,6 +117,26 @@ jobs:
         
         Write-Host "Download complete: $isoPath"
         Write-Host "File size: $((Get-Item $isoPath).Length / 1GB) GB"
+        
+    - name: Verify ISO file
+      if: inputs.iso_url != ''
+      shell: powershell
+      run: |
+        $isoPath = "C:\Windows11.iso"
+        $cacheHit = "${{ steps.cache-iso.outputs.cache-hit }}"
+        
+        if ($cacheHit -eq 'true') {
+          Write-Host "ISO restored from cache"
+        }
+        
+        if (Test-Path $isoPath) {
+          $size = (Get-Item $isoPath).Length / 1GB
+          Write-Host "[OK] ISO file exists: $isoPath"
+          Write-Host "     File size: $([math]::Round($size, 2)) GB"
+        } else {
+          Write-Error "ISO file not found at $isoPath"
+          exit 1
+        }
         
     - name: Mount Windows 11 ISO
       if: inputs.iso_url != ''
@@ -109,7 +154,7 @@ jobs:
         
         # Verify mount
         if (Test-Path "${driveLetter}:\sources\install.wim") {
-          Write-Host "✓ Installation files found"
+          Write-Host "[OK] Installation files found"
         } else {
           Write-Error "Installation files not found!"
           exit 1
@@ -185,7 +230,7 @@ jobs:
         
         if (Test-Path $expectedIso) {
           $size = (Get-Item $expectedIso).Length / 1GB
-          Write-Host "✓ ISO created successfully: $expectedIso"
+          Write-Host "[OK] ISO created successfully: $expectedIso"
           Write-Host "  Size: $([math]::Round($size, 2)) GB"
           echo "OUTPUT_ISO=$expectedIso" >> $env:GITHUB_ENV
         } else {
@@ -217,7 +262,9 @@ jobs:
         # Remove temporary directories
         Remove-Item -Path "C:\nano11" -Recurse -Force -ErrorAction SilentlyContinue
         Remove-Item -Path "C:\scratchdir" -Recurse -Force -ErrorAction SilentlyContinue
-        Remove-Item -Path $isoPath -Force -ErrorAction SilentlyContinue
+        
+        # Note: ISO file is preserved for caching and will be managed by actions/cache
+        Write-Host "Note: ISO file preserved at $isoPath for caching"
         
         Write-Host "Cleanup complete"
         
@@ -239,20 +286,20 @@ jobs:
           Write-Host "  6. Click 'Run workflow' button"
           Write-Host ""
           Write-Host "The workflow will:"
-          Write-Host "  • Download the ISO"
-          Write-Host "  • Build the Nano11 ISO"
-          Write-Host "  • Upload it as an artifact"
+          Write-Host "  - Download the ISO"
+          Write-Host "  - Build the Nano11 ISO"
+          Write-Host "  - Upload it as an artifact"
           Write-Host ""
           Write-Host "Note: Free GitHub Actions has limits:"
-          Write-Host "  • Artifact size: Up to 10GB"
-          Write-Host "  • Artifact retention: Configurable (default 7 days)"
-          Write-Host "  • Disk space: ~14GB available on Windows runners"
+          Write-Host "  - Artifact size: Up to 10GB"
+          Write-Host "  - Artifact retention: Configurable (default 7 days)"
+          Write-Host "  - Disk space: ~14GB available on Windows runners"
         } else {
           Write-Host ""
           Write-Host "Build attempted with ISO URL: ${{ inputs.iso_url }}"
           Write-Host ""
           if (Test-Path env:OUTPUT_ISO) {
-            Write-Host "✓ Build completed successfully!"
+            Write-Host "[OK] Build completed successfully!"
             Write-Host "  Output: $env:OUTPUT_ISO"
             Write-Host "  Download from the Artifacts section"
           } else {
