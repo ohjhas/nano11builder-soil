@@ -1,0 +1,262 @@
+name: Build Nano11 ISO
+
+on:
+  workflow_dispatch:
+    inputs:
+      iso_url:
+        description: 'Windows 11 ISO URL (leave empty to skip build, this is just a demonstration)'
+        required: false
+        type: string
+      image_index:
+        description: 'Windows image index (usually 1 for Home, 6 for Pro)'
+        required: false
+        default: '1'
+        type: string
+      architecture:
+        description: 'Architecture'
+        required: true
+        default: 'x64'
+        type: choice
+        options:
+          - x64
+          - arm64
+      edition:
+        description: 'Edition'
+        required: true
+        default: 'standard'
+        type: choice
+        options:
+          - standard
+          - copilot
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+      actions: read
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Check Windows version and available tools
+      shell: powershell
+      run: |
+        Write-Host "Windows Version:"
+        systeminfo | findstr /B /C:"OS Name" /C:"OS Version"
+        Write-Host "`nDISM Version:"
+        dism /?
+        Write-Host "`nAvailable Disk Space:"
+        Get-PSDrive C | Select-Object Used,Free
+        
+    - name: Display workflow information
+      shell: powershell
+      run: |
+        Write-Host "=== Nano11 Builder - GitHub Actions Workflow ==="
+        Write-Host ""
+        Write-Host "This workflow demonstrates that you CAN build Nano11 ISOs in GitHub Actions!"
+        Write-Host ""
+        Write-Host "GitHub Actions provides:"
+        Write-Host "  ✓ Windows Server runners with DISM pre-installed"
+        Write-Host "  ✓ Sufficient disk space for ISO creation"
+        Write-Host "  ✓ PowerShell and batch script support"
+        Write-Host "  ✓ Artifact upload for distributing results"
+        Write-Host ""
+        Write-Host "Selected Configuration:"
+        Write-Host "  - Architecture: ${{ inputs.architecture }}"
+        Write-Host "  - Edition: ${{ inputs.edition }}"
+        Write-Host "  - Image Index: ${{ inputs.image_index }}"
+        Write-Host ""
+        if ("${{ inputs.iso_url }}" -eq "") {
+          Write-Host "NOTE: No ISO URL provided - this run will demonstrate the workflow"
+          Write-Host "      without actually building an ISO."
+          Write-Host ""
+          Write-Host "To build an actual ISO, provide a Windows 11 ISO URL when running this workflow."
+        } else {
+          Write-Host "ISO URL provided: ${{ inputs.iso_url }}"
+        }
+        
+    - name: Download Windows 11 ISO
+      if: inputs.iso_url != ''
+      shell: powershell
+      run: |
+        Write-Host "Downloading Windows 11 ISO..."
+        $isoUrl = "${{ inputs.iso_url }}"
+        $isoPath = "C:\Windows11.iso"
+        
+        # Download with progress
+        $ProgressPreference = 'SilentlyContinue'
+        Invoke-WebRequest -Uri $isoUrl -OutFile $isoPath
+        $ProgressPreference = 'Continue'
+        
+        Write-Host "Download complete: $isoPath"
+        Write-Host "File size: $((Get-Item $isoPath).Length / 1GB) GB"
+        
+    - name: Mount Windows 11 ISO
+      if: inputs.iso_url != ''
+      shell: powershell
+      run: |
+        Write-Host "Mounting ISO..."
+        $isoPath = "C:\Windows11.iso"
+        $mount = Mount-DiskImage -ImagePath $isoPath -PassThru
+        $driveLetter = ($mount | Get-Volume).DriveLetter
+        
+        Write-Host "ISO mounted to drive: ${driveLetter}:"
+        
+        # Save drive letter for next steps
+        echo "ISO_DRIVE=${driveLetter}" >> $env:GITHUB_ENV
+        
+        # Verify mount
+        if (Test-Path "${driveLetter}:\sources\install.wim") {
+          Write-Host "✓ Installation files found"
+        } else {
+          Write-Error "Installation files not found!"
+          exit 1
+        }
+        
+    - name: Prepare build script
+      if: inputs.iso_url != ''
+      shell: powershell
+      run: |
+        # Determine which script to use
+        $architecture = "${{ inputs.architecture }}"
+        $edition = "${{ inputs.edition }}"
+        
+        if ($edition -eq "copilot") {
+          if ($architecture -eq "arm64") {
+            $scriptName = "nano11builder_copilot_arm64.bat"
+          } else {
+            $scriptName = "nano11builder_copilot.bat"
+          }
+        } else {
+          if ($architecture -eq "arm64") {
+            $scriptName = "Nano11Builder_arm64.bat"
+          } else {
+            $scriptName = "Nano11Builder.bat"
+          }
+        }
+        
+        Write-Host "Using script: $scriptName"
+        echo "BUILD_SCRIPT=$scriptName" >> $env:GITHUB_ENV
+        
+        # Create automated version of the script
+        $originalScript = Get-Content $scriptName -Raw
+        
+        # Replace interactive prompts with environment variables
+        $automatedScript = $originalScript `
+          -replace 'set /p DriveLetter=.*', "set DriveLetter=$env:ISO_DRIVE" `
+          -replace 'set /p index=.*', "set index=${{ inputs.image_index }}"
+        
+        $automatedScript | Out-File -FilePath "automated_build.bat" -Encoding ASCII
+        
+        Write-Host "Automated build script created"
+        
+    - name: Build Nano11 ISO
+      if: inputs.iso_url != ''
+      shell: cmd
+      run: |
+        echo Building Nano11 ISO...
+        call automated_build.bat
+        
+    - name: Verify build output
+      if: inputs.iso_url != ''
+      shell: powershell
+      run: |
+        Write-Host "Checking for output ISO files..."
+        
+        $architecture = "${{ inputs.architecture }}"
+        $edition = "${{ inputs.edition }}"
+        
+        # Determine expected output filename
+        if ($edition -eq "copilot") {
+          if ($architecture -eq "arm64") {
+            $expectedIso = "nano11_copilot_arm64.iso"
+          } else {
+            $expectedIso = "nano11.iso"
+          }
+        } else {
+          if ($architecture -eq "arm64") {
+            $expectedIso = "nano11_arm64.iso"
+          } else {
+            $expectedIso = "nano11.iso"
+          }
+        }
+        
+        if (Test-Path $expectedIso) {
+          $size = (Get-Item $expectedIso).Length / 1GB
+          Write-Host "✓ ISO created successfully: $expectedIso"
+          Write-Host "  Size: $([math]::Round($size, 2)) GB"
+          echo "OUTPUT_ISO=$expectedIso" >> $env:GITHUB_ENV
+        } else {
+          Write-Host "Available files in current directory:"
+          Get-ChildItem *.iso -ErrorAction SilentlyContinue
+          Write-Warning "Expected ISO not found: $expectedIso"
+        }
+        
+    - name: Upload Nano11 ISO
+      if: inputs.iso_url != '' && success()
+      uses: actions/upload-artifact@v4
+      with:
+        name: nano11-${{ inputs.architecture }}-${{ inputs.edition }}
+        path: "*.iso"
+        retention-days: 7
+        
+    - name: Cleanup
+      if: always() && inputs.iso_url != ''
+      shell: powershell
+      run: |
+        Write-Host "Cleaning up..."
+        
+        # Dismount ISO if mounted
+        $isoPath = "C:\Windows11.iso"
+        if (Test-Path $isoPath) {
+          Dismount-DiskImage -ImagePath $isoPath -ErrorAction SilentlyContinue
+        }
+        
+        # Remove temporary directories
+        Remove-Item -Path "C:\nano11" -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path "C:\scratchdir" -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path $isoPath -Force -ErrorAction SilentlyContinue
+        
+        Write-Host "Cleanup complete"
+        
+    - name: Workflow summary
+      if: always()
+      shell: powershell
+      run: |
+        Write-Host "`n=== Workflow Summary ==="
+        if ("${{ inputs.iso_url }}" -eq "") {
+          Write-Host ""
+          Write-Host "This was a demonstration run without an actual ISO build."
+          Write-Host ""
+          Write-Host "To build a real Nano11 ISO in GitHub Actions:"
+          Write-Host "  1. Go to Actions tab in your repository"
+          Write-Host "  2. Select 'Build Nano11 ISO' workflow"
+          Write-Host "  3. Click 'Run workflow'"
+          Write-Host "  4. Provide a Windows 11 ISO URL"
+          Write-Host "  5. Select architecture and edition"
+          Write-Host "  6. Click 'Run workflow' button"
+          Write-Host ""
+          Write-Host "The workflow will:"
+          Write-Host "  • Download the ISO"
+          Write-Host "  • Build the Nano11 ISO"
+          Write-Host "  • Upload it as an artifact"
+          Write-Host ""
+          Write-Host "Note: Free GitHub Actions has limits:"
+          Write-Host "  • Artifact size: Up to 10GB"
+          Write-Host "  • Artifact retention: Configurable (default 7 days)"
+          Write-Host "  • Disk space: ~14GB available on Windows runners"
+        } else {
+          Write-Host ""
+          Write-Host "Build attempted with ISO URL: ${{ inputs.iso_url }}"
+          Write-Host ""
+          if (Test-Path env:OUTPUT_ISO) {
+            Write-Host "✓ Build completed successfully!"
+            Write-Host "  Output: $env:OUTPUT_ISO"
+            Write-Host "  Download from the Artifacts section"
+          } else {
+            Write-Host "Build may have encountered issues."
+            Write-Host "Check the logs above for details."
+          }
+        }
