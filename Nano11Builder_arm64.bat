@@ -174,7 +174,7 @@ copy /y %~dp0wallpaperlight.jpg c:\scratchdir\Windows\Web\Wallpaper\Windows\img0
 del C:\scratchdir\Windows\Web\Screen\img100.jpg
 copy /y %~dp0wallpaperdark.jpg C:\Scratchdir\Windows\Web\Screen\img100.jpg
 echo Cleaning up image...
-dism /image:c:\scratchdir /Cleanup-Image /StartComponentCleanup /ResetBase
+dism /image:c:\scratchdir /Cleanup-Image /StartComponentCleanup
 echo Cleanup complete.
 echo Unmounting image...
 dism /unmount-image /mountdir:c:\scratchdir /commit

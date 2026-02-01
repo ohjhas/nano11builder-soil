@@ -79,6 +79,9 @@ To use the ARM64 scripts:
 3. Run either `Nano11Builder_arm64.bat` or `nano11builder_copilot_arm64.bat`
 4. Follow the same instructions as the x64 version
 
+**ARM64 UTM Compatibility:**
+The ARM64 scripts have been optimized for compatibility with UTM (macOS virtualization) and other VirtIO-based ARM64 virtual machines. The scripts preserve essential storage drivers to prevent "media driver missing" errors during installation. For more details, see [ARM64_UTM_FIX.md](ARM64_UTM_FIX.md).
+
 Known issues:
 
 1. Only en-us language is supported as of now. This can be easily fixable by the end user, just by replacing every instance of en-us with the language needed (like ro-RO and so on).
